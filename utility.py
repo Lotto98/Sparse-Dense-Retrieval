@@ -127,6 +127,7 @@ def ground_truth(results_sparse, results_dense, k:int ):
     for ( quey_id, relevant_sparse ), relevant_dense in zip( results_sparse.items(), results_dense.values() ):
         
         #union of sparse documents and dense documents by summing up the scores
+        #if id not present the corresponding score is assumed to be 0.
         documents_per_query={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, 0)  
                                 for doc_id in set(relevant_sparse) | set(relevant_dense) }
         
@@ -152,6 +153,7 @@ def merging( results_sparse, results_dense, k_prime:int ):
         top_k_prime_documents_dense = heapq.nlargest(k_prime, relevant_dense, key=relevant_dense.get)
         
         #union of top k prime sparse documents and top k prime dense documents by summing up their scores
+        #if id not present the corresponding score is assumed to be 0.
         result[quey_id]={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, 0)
                             for doc_id in set(top_k_prime_documents_sparse) | set(top_k_prime_documents_dense) }
         
