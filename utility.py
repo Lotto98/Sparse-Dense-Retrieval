@@ -106,6 +106,7 @@ def BM25_retrieval(documents,queries):
         
         scores=bm25.get_scores(query)
         
+        #documents which score is 0 are not present for performance reasons
         results[q_id]={ key:score for key,score in zip(d.keys(),scores) if score!=0 }
 
     return results
