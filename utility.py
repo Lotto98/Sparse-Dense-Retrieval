@@ -1,4 +1,3 @@
-import time
 from beir.datasets.data_loader import GenericDataLoader
 from beir import util
 
@@ -6,14 +5,12 @@ from tqdm.notebook import tqdm
 
 import pathlib, os
 
-from beir.retrieval.search.lexical import BM25Search as BM25
 from beir.retrieval.evaluation import EvaluateRetrieval
 from beir.retrieval import models
 from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
 
 import spacy
 from multiprocessing import Pool
-from subprocess import Popen, DEVNULL
 
 import warnings
 
@@ -25,7 +22,7 @@ from rank_bm25 import BM25Okapi
 
 _nlp = spacy.load("en_core_web_sm", disable=["tok2vec", "parser", "attribute_ruler", "ner"])
 
-_cleaning = lambda text: [token.lemma_ for token in _nlp(text) if not token.is_stop and not token.is_punct]
+_tokenizer_cleaner = lambda text: [token.lemma_ for token in _nlp(text) if not token.is_stop and not token.is_punct]
 
 def data_preparation(dataset:str):
        
@@ -42,73 +39,77 @@ def _clean_document(document):
         
     id, doc_old = document
 
-    return id, _cleaning( doc_old["text"] )
-        
-def old_BM25_retrieval(documents,queries):
-        
-        print("cleaning...")
-        
-        with warnings.catch_warnings():
-                
-                warnings.simplefilter("ignore")
-                with Pool(8) as p:
-                    d={id:doc for id,doc in list(tqdm( p.imap(_clean_document, documents.items()), 
-                                                        total=len(documents),
-                                                        desc="document cleaning"))}
-                
-                q={}
-                for id,text in tqdm(queries.items(), desc="query cleaning"):
-                        q[id]=_cleaning( text )
-        
-        print("BM25...")
-        
-        p=Popen(["elasticsearch-8.7.0/bin/elasticsearch"], stdout=DEVNULL)
-        
-        for _ in tqdm( range(10), desc="starting Elastic Search" ):
-            time.sleep(3)
-        
-        hostname = "http://elastic:sjI=G_r_Gyd+afe42LJ+@localhost:9200/"
-        index_name = "bm25" 
-        initialize = True
+    return id, _tokenizer_cleaner( doc_old["title"] ), _tokenizer_cleaner( doc_old["text"] )
 
-        model = BM25(index_name=index_name, hostname=hostname, initialize=initialize)
-        retriever = EvaluateRetrieval(model, k_values=[9999], score_function="dot")
-
-        results = retriever.retrieve(d, q)
-        
-        p.terminate()
-        
-        return results
-    
-def BM25_retrieval(documents,queries):
-    
-    print("cleaning...")
-        
-    with warnings.catch_warnings():
-            
-        warnings.simplefilter("ignore")
-        with Pool(8) as p:
-            d={id:doc for id,doc in list(tqdm( p.imap(_clean_document, documents.items()), 
-                                                total=len(documents),
-                                                desc="document cleaning"))}
-        
-        q={}
-        for id,text in tqdm(queries.items(), desc="query cleaning"):
-                q[id]=_cleaning( text )
-    
-    print("BM25...")
-        
-    bm25=BM25Okapi(d.values())
+def _BM25(bm25, d_keys, q, start, stop, skip):
     
     results={}
     
-    for q_id,query in tqdm(q.items()):
+    for i in range(start, stop, skip):
+        
+        q_id, query = q[i]
         
         scores=bm25.get_scores(query)
         
         #documents which score is 0 are not present for performance reasons
-        results[q_id]={ key:score for key,score in zip(d.keys(),scores) if score!=0 }
-
+        results[q_id]={ key:score for key,score in zip(d_keys,scores) if score!=0 }
+        
+    return results
+    
+def BM25_retrieval(documents,queries):
+    
+    #document & query cleaning and tokenization
+    
+    #disable warning for the nlp
+    with warnings.catch_warnings():
+            
+        warnings.simplefilter("ignore")
+        
+        #parallel document cleaning and tokenization
+        with Pool(8) as p:
+            tokenized_docs=list(tqdm( p.imap(_clean_document, documents.items()), 
+                                                total=len(documents),
+                                                desc="document cleaning and tokenization"))
+        d={}
+        for id, text, title in tokenized_docs:
+            d[id]=title+text
+        
+        #query cleaning
+        q={}
+        for id,text in tqdm( queries.items(), desc="query cleaning and tokenization" ):
+            q[id]=_tokenizer_cleaner( text )
+    
+    #BM25
+    
+    results={}
+    
+    #progress bar
+    pbar = tqdm(total=len(q),desc="BM25")
+    
+    #callback execute at the end of each execution
+    def callback(result):
+        
+        #update results with intermediate result
+        results.update(result)
+        
+        #update progress bar
+        pbar.update(len(result))
+    
+    #process pool
+    p=Pool(8)
+    
+    #process variables
+    bm25=BM25Okapi(d.values())
+    d_keys = list(d.keys())
+    q_items = list(q.items())
+    
+    #processes start
+    for start in range(8):
+        p.apply_async(func=_BM25,args=(bm25, d_keys, q_items, start, len(q), 8, ), callback=callback, error_callback = lambda x: print(x))
+        
+    p.close()
+    p.join()
+    
     return results
 
 def dense_retrieval(documents, queries):
@@ -128,8 +129,10 @@ def ground_truth(results_sparse, results_dense, k:int ):
     for ( quey_id, relevant_sparse ), relevant_dense in zip( results_sparse.items(), results_dense.values() ):
         
         #union of sparse documents and dense documents by summing up the scores
-        #if id not present the corresponding score is assumed to be 0.
-        documents_per_query={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, 0)  
+        #if id not present the corresponding score is assumed:
+        # -to be 0 for the sparse representation.
+        # -to be -inf for the dense representation.
+        documents_per_query={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, float("-inf"))  
                                 for doc_id in set(relevant_sparse) | set(relevant_dense) }
         
         #top k relevant document ids
@@ -154,8 +157,10 @@ def merging( results_sparse, results_dense, k_prime:int ):
         top_k_prime_documents_dense = heapq.nlargest(k_prime, relevant_dense, key=relevant_dense.get)
         
         #union of top k prime sparse documents and top k prime dense documents by summing up their scores
-        #if id not present the corresponding score is assumed to be 0.
-        result[quey_id]={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, 0)
+        #if id not present the corresponding score is assumed:
+        # -to be 0 for the sparse representation.
+        # -to be -inf for the dense representation.
+        result[quey_id]={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, float("-inf"))
                             for doc_id in set(top_k_prime_documents_sparse) | set(top_k_prime_documents_dense) }
         
     return result
