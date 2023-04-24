@@ -1,4 +1,5 @@
 #type hints
+import pickle
 from typing import Dict, List, Tuple
 
 #data loading
@@ -29,6 +30,7 @@ import heapq
 import warnings
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 #text cleaning object
 _nlp = spacy.load("en_core_web_sm", disable=["tok2vec", "parser", "attribute_ruler", "ner"])
@@ -123,14 +125,14 @@ def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]
         with Pool(8) as p:
             tokenized_docs=list(tqdm( p.imap(_clean_document, documents.items()), 
                                                 total=len(documents),
-                                                desc="document cleaning and tokenization"))
+                                                desc="documents cleaning and tokenization"))
         d={}
         for id, text, title in tokenized_docs:
             d[id]=title+text
         
         #query cleaning
         q={}
-        for id,text in tqdm( queries.items(), desc="query cleaning and tokenization" ):
+        for id,text in tqdm( queries.items(), desc="queries cleaning and tokenization" ):
             q[id]=_tokenizer_cleaner( text )
     
     #BM25
@@ -138,7 +140,7 @@ def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]
     results={}
     
     #progress bar
-    pbar = tqdm(total=len(q),desc="BM25")
+    pbar = tqdm(total=len(q),desc="BM25 scores calculation")
     
     #callback execute at the end of each execution
     def callback(result):
@@ -163,6 +165,7 @@ def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]
         
     p.close()
     p.join()
+    pbar.close()
     
     return results
 
@@ -257,7 +260,7 @@ def merging(results_sparse: Dict[str, Dict[str, float]],
         
     return result
     
-def metrics_calculation(results_sparse: Dict[str, Dict[str, float]], results_dense: Dict[str, Dict[str, float]],
+def metrics_calculation(dataset:str,results_sparse: Dict[str, Dict[str, float]], results_dense: Dict[str, Dict[str, float]],
                         ks: list[int] = [50,100,150], k_primes: list[int] = [x for x in range(20, 170, 5)]) -> Dict[int, Dict[int, Dict[str, float]]]:
     """
     Metrics calculation (ndcg, recall and precision) for each values of k' by fixing the k value. 
@@ -292,4 +295,39 @@ def metrics_calculation(results_sparse: Dict[str, Dict[str, float]], results_den
         
         metrics_per_k[k]=metrics_per_k_prime
         
+    with open(dataset+"_metrics.pkl", 'wb') as outp:
+        pickle.dump(metrics_per_k, outp, pickle.HIGHEST_PROTOCOL)
+        
     return metrics_per_k
+
+def load_metrics(dataset:str):
+    
+    with open(dataset+"_metrics.pkl", 'rb') as inp:
+        metrics_per_k = pickle.load(inp)
+    
+    return metrics_per_k
+
+def plot_top_k_metrics_vs_k_prime(metrics_per_k: Dict[int, Dict[int, Dict[str, float]]]):
+    
+    fig, axs = plt.subplots(1, 3, figsize=(14*3, 10))
+
+    for ax, metric_name in zip(axs,["ndcg", "recall", "precision"]):
+
+        ax.set_xlabel("k'",fontsize=15)
+        ax.set_ylabel(metric_name,fontsize=15)
+        
+        ax.set_title(metric_name+" vs k'",fontsize=20)
+
+        for k, metrics_per_k_prime in metrics_per_k.items():
+            
+            x, y = np.array([[key, metrics[metric_name]]
+                            for key, metrics in metrics_per_k_prime.items()]).T
+
+            ax.plot(x, y, '-x', label="k = "+str(k))
+            
+            ax.grid()
+            
+        handles, labels = ax.get_legend_handles_labels()
+        ax.xaxis.set_ticks(np.arange(15, 175, 5.0))
+    
+    fig.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.93, 0.93))
