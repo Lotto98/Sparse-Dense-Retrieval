@@ -1,47 +1,91 @@
+#type hints
+from typing import Dict, List, Tuple
+
+#data loading
 from beir.datasets.data_loader import GenericDataLoader
 from beir import util
-
-from tqdm.notebook import tqdm
-
 import pathlib, os
 
+#progress bar
+from tqdm.notebook import tqdm
+
+#beir dense retrieval and beir evaluation 
 from beir.retrieval.evaluation import EvaluateRetrieval
 from beir.retrieval import models
 from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
 
+#text cleaning
 import spacy
+
+#multiprocessing
 from multiprocessing import Pool
+
+#sparse retrieval
+from rank_bm25 import BM25Okapi
+
+#fast top k/top k prime
+import heapq
 
 import warnings
 
-import heapq
-
 import numpy as np
 
-from rank_bm25 import BM25Okapi
-
+#text cleaning object
 _nlp = spacy.load("en_core_web_sm", disable=["tok2vec", "parser", "attribute_ruler", "ner"])
 
+#text cleaning and tokenization function
 _tokenizer_cleaner = lambda text: [token.lemma_ for token in _nlp(text) if not token.is_stop and not token.is_punct]
 
-def data_preparation(dataset:str):
-       
-       # Download dataset and unzip the dataset
-       url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset)
-       out_dir = os.path.join(pathlib.Path(os.path.abspath('')), "datasets")
-       data_path = util.download_and_unzip(url, out_dir)
-       
-       documents,queries,_=GenericDataLoader(data_path).load(split="test")
-       
-       return documents,queries
+def data_preparation(dataset: str) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
+    """
+    Download the given dataset from beir.
 
-def _clean_document(document):
-        
+    Args:
+        dataset (str): dataset name.
+
+    Returns:
+        Tuple[Dict[str, Dict[str, str]], Dict[str, str]]: documents and queries.
+    """
+    
+    #Download dataset and unzip the dataset
+    url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset)
+    out_dir = os.path.join(pathlib.Path(os.path.abspath('')), "datasets")
+    data_path = util.download_and_unzip(url, out_dir)
+    
+    #Retrieve documents and queries
+    documents,queries,_=GenericDataLoader(data_path).load(split="test")
+    
+    return documents,queries
+
+def _clean_document(document: Tuple[str, Dict[str, str]]) -> Tuple[str, str, str]:
+    """
+    Auxiliary function for cleaning and tokenize the given document.
+    
+    Args:
+        document (Tuple[str, Dict[str, str]]): tuple of document id and dict of document text and document title
+
+    Returns:
+        Tuple[str, str, str]: tuple of document id, cleaned and tokenized document text and cleaned and tokenized document title
+    """
     id, doc_old = document
 
     return id, _tokenizer_cleaner( doc_old["title"] ), _tokenizer_cleaner( doc_old["text"] )
 
-def _BM25(bm25, d_keys, q, start, stop, skip):
+def _BM25(bm25, d_keys: List[str], q :List[Tuple[str, List[str]]], start:int, stop:int, skip:int) -> Dict[str, Dict[str, float]]:
+    """
+    Auxiliary function for the BM25 scores calculation.
+
+    Args:
+        bm25 (bm25 object): bm25 object
+        d_keys (List[str]): list of document ids
+        q (List[Tuple[str, List[str]]]): list of tuple of query id and tokenized query text
+        start (int): start query index to process
+        stop (int): stop query index to process
+        skip (int): how many queries to skip
+
+    Returns:
+        Dict[str, Dict[str, float]]: dict of query id and dict of document id and relative score
+    """
     
     results={}
     
@@ -56,7 +100,17 @@ def _BM25(bm25, d_keys, q, start, stop, skip):
         
     return results
     
-def BM25_retrieval(documents,queries):
+def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]) -> Dict[str, Dict[str, float]]:
+    """
+    BM25 scores calculation.
+
+    Args:
+        documents (Dict[str, Dict[str, str]]) 
+        queries (Dict[str, str])
+
+    Returns:
+        Dict[str, Dict[str, float]]: dict of query id and dict of document id and relative score.
+    """
     
     #document & query cleaning and tokenization
     
@@ -99,7 +153,7 @@ def BM25_retrieval(documents,queries):
     p=Pool(8)
     
     #process variables
-    bm25=BM25Okapi(d.values())
+    bm25 = BM25Okapi(d.values())
     d_keys = list(d.keys())
     q_items = list(q.items())
     
@@ -112,7 +166,17 @@ def BM25_retrieval(documents,queries):
     
     return results
 
-def dense_retrieval(documents, queries):
+def dense_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]) -> Dict[str, Dict[str, float]]:
+    """
+    Dense scores calculation using "all-MiniLM-L6-v2" model.
+
+    Args:
+        documents (Dict[str, Dict[str, str]])
+        queries (Dict[str, str])
+
+    Returns:
+        Dict[str, Dict[str, float]]: dict of query id and dict of document id and relative score.
+    """
     
     model = DRES(models.SentenceBERT("all-MiniLM-L6-v2"))
     retriever = EvaluateRetrieval(model, k_values=[len(documents)], score_function="dot")
@@ -121,7 +185,21 @@ def dense_retrieval(documents, queries):
     
     return results
 
-def ground_truth(results_sparse, results_dense, k:int ):
+def ground_truth(results_sparse: Dict[str, Dict[str, float]], results_dense: Dict[str, Dict[str, float]],
+                k:int ) -> Dict[str, Dict[str, int]]:
+    """
+    Calculation of the ground truth for each query by:
+    1) summing up the BM25 score and the dense score for each document
+    2) retrieve the top k documents
+
+    Args:
+        results_sparse (Dict[str, Dict[str, float]]): dict of query id and dict of document id and relative sparse score.
+        results_dense (Dict[str, Dict[str, float]]): dict of query id and dict of document id and relative dense score.
+        k (int): number of document to take into account for the top-k.
+
+    Returns:
+        Dict[str, Dict[str, int]]: dict of query id and dict of document id and relative score.
+    """
     
     real_result={}
 
@@ -143,7 +221,21 @@ def ground_truth(results_sparse, results_dense, k:int ):
     
     return real_result
 
-def merging( results_sparse, results_dense, k_prime:int ):
+def merging(results_sparse: Dict[str, Dict[str, float]],
+            results_dense: Dict[str, Dict[str, float]], k_prime:int ) -> Dict[str, Dict[str, float]]:
+    """
+    Calculation of the merging results for each query by:
+    1) retrieve the top k' documents from the sparse and dense results.
+    2) summing up the top k' sparse documents scores and the top k' dense documents scores
+
+    Args:
+        results_sparse (Dict[str, Dict[str, float]]): dict of query id and dict of document id and relative sparse score.
+        results_dense (Dict[str, Dict[str, float]]): dict of query id and dict of document id and relative dense score.
+        k_prime (int): number of document to take into account for the top-k'.
+
+    Returns:
+        Dict[str, Dict[str, int]]: dict of query id and dict of document id and relative score.
+    """
     
     result={}
     
@@ -164,3 +256,40 @@ def merging( results_sparse, results_dense, k_prime:int ):
                             for doc_id in set(top_k_prime_documents_sparse) | set(top_k_prime_documents_dense) }
         
     return result
+    
+def metrics_calculation(results_sparse: Dict[str, Dict[str, float]], results_dense: Dict[str, Dict[str, float]],
+                        ks: list[int] = [50,100,150], k_primes: list[int] = [x for x in range(20, 170, 5)]) -> Dict[int, Dict[int, Dict[str, float]]]:
+    """
+    Metrics calculation (ndcg, recall and precision) for each values of k' by fixing the k value. 
+
+    Args:
+        results_sparse (Dict[str, Dict[str, float]]): dict of query id and dict of document id and relative sparse score.
+        results_dense (Dict[str, Dict[str, float]]): dict of query id and dict of document id and relative dense score.
+        ks (list[int], optional): list of k values for calculating the ground truth. Defaults to [50,100,150].
+        k_primes (list[int], optional): list of k' values for calculating the merged results for each fixed k. Defaults to [x for x in range(20, 170, 5)].
+
+    Returns:
+        Dict[int, Dict[int, Dict[str, float]]]: dict of k value and dict of k' value and dict of metric name and metric value.
+    """
+
+    metrics_per_k={}
+    
+    for k in tqdm(ks, desc="k values:"):
+        metrics_per_k_prime = {}
+
+        gt_k = ground_truth(results_sparse, results_dense, k)
+        
+        for k_prime in tqdm( k_primes, desc="k' values:"):
+
+            results = merging(results_sparse, results_dense, k_prime)
+            
+            ndcg, _, recall, precision = EvaluateRetrieval.evaluate(gt_k,
+                                                                    results, [k])
+
+            metrics = {"ndcg": list(ndcg.values())[0], "recall": list(recall.values())[0], "precision": list(precision.values())[0]}
+
+            metrics_per_k_prime[k_prime] = metrics
+        
+        metrics_per_k[k]=metrics_per_k_prime
+        
+    return metrics_per_k
