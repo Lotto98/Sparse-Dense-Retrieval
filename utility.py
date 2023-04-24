@@ -19,7 +19,7 @@ from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
 import spacy
 
 #multiprocessing
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 
 #sparse retrieval
 from rank_bm25 import BM25Okapi
@@ -122,7 +122,7 @@ def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]
         warnings.simplefilter("ignore")
         
         #parallel document cleaning and tokenization
-        with Pool(8) as p:
+        with Pool() as p:
             tokenized_docs=list(tqdm( p.imap(_clean_document, documents.items()), 
                                                 total=len(documents),
                                                 desc="documents cleaning and tokenization"))
@@ -152,7 +152,7 @@ def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]
         pbar.update(len(result))
     
     #process pool
-    p=Pool(8)
+    p=Pool()
     
     #process variables
     bm25 = BM25Okapi(d.values())
@@ -160,8 +160,8 @@ def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]
     q_items = list(q.items())
     
     #processes start
-    for start in range(8):
-        p.apply_async(func=_BM25,args=(bm25, d_keys, q_items, start, len(q), 8, ), callback=callback, error_callback = lambda x: print(x))
+    for start in range( cpu_count() ):
+        p.apply_async(func=_BM25,args=(bm25, d_keys, q_items, start, len(q), cpu_count(), ), callback=callback, error_callback = lambda x: print(x))
         
     p.close()
     p.join()
