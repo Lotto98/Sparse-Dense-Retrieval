@@ -225,7 +225,7 @@ def ground_truth(results_sparse: Dict[str, Dict[str, float]], results_dense: Dic
     return real_result
 
 def merging(results_sparse: Dict[str, Dict[str, float]],
-            results_dense: Dict[str, Dict[str, float]], k_prime:int ) -> Dict[str, Dict[str, float]]:
+            results_dense: Dict[str, Dict[str, float]], k_prime:int, k:int) -> Dict[str, Dict[str, float]]:
     """
     Calculation of the merging results for each query by:
     1) retrieve the top k' documents from the sparse and dense results.
@@ -255,8 +255,14 @@ def merging(results_sparse: Dict[str, Dict[str, float]],
         #if id not present the corresponding score is assumed:
         # -to be 0 for the sparse representation.
         # -to be -inf for the dense representation.
-        result[quey_id]={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, float("-inf"))
+        merged = { doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, float("-inf"))
                             for doc_id in set(top_k_prime_documents_sparse) | set(top_k_prime_documents_dense) }
+        
+        #retrieve the top-k documents from the merged set
+        top_k_documents_merged = heapq.nlargest(k, merged, key=merged.get)
+        
+        #id : merged_score
+        result[quey_id] = { doc_id: merged[doc_id] for doc_id in set(top_k_documents_merged) }
         
     return result
     
@@ -284,7 +290,7 @@ def metrics_calculation(dataset:str,results_sparse: Dict[str, Dict[str, float]],
         
         for k_prime in tqdm( k_primes, desc="k' values:"):
 
-            results = merging(results_sparse, results_dense, k_prime)
+            results = merging(results_sparse, results_dense, k_prime, k)
             
             ndcg, _, recall, precision = EvaluateRetrieval.evaluate(gt_k,
                                                                     results, [k])
@@ -329,5 +335,6 @@ def plot_top_k_metrics_vs_k_prime(metrics_per_k: Dict[int, Dict[int, Dict[str, f
             
         handles, labels = ax.get_legend_handles_labels()
         ax.xaxis.set_ticks(np.arange(15, 175, 5.0))
+        ax.yaxis.set_ticks(np.arange(0, 1.05, 0.05))
     
     fig.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.93, 0.93))
