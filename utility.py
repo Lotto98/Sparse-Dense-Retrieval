@@ -27,16 +27,8 @@ from rank_bm25 import BM25Okapi
 #fast top k/top k prime
 import heapq
 
-import warnings
-
 import numpy as np
 import matplotlib.pyplot as plt
-
-#text cleaning object
-_nlp = spacy.load("en_core_web_sm", disable=["tok2vec", "parser", "attribute_ruler", "ner"])
-
-#text cleaning and tokenization function
-_tokenizer_cleaner = lambda text: [token.lemma_ for token in _nlp(text) if not token.is_stop and not token.is_punct]
 
 def data_preparation(dataset: str) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
     """
@@ -59,6 +51,12 @@ def data_preparation(dataset: str) -> Tuple[Dict[str, Dict[str, str]], Dict[str,
     
     return documents,queries
 
+#load the spacy model for lemmatization 
+_nlp = spacy.load("en_core_web_lg",disable=['parser','ner'])
+
+#text cleaning and tokenization function
+_tokenizer_cleaner = lambda text: [token.lemma_ for token in _nlp(text) if not token.is_stop and not token.is_punct]
+
 def _clean_document(document: Tuple[str, Dict[str, str]]) -> Tuple[str, str, str]:
     """
     Auxiliary function for cleaning and tokenize the given document.
@@ -70,7 +68,7 @@ def _clean_document(document: Tuple[str, Dict[str, str]]) -> Tuple[str, str, str
         Tuple[str, str, str]: tuple of document id, cleaned and tokenized document text and cleaned and tokenized document title
     """
     id, doc_old = document
-
+    
     return id, _tokenizer_cleaner( doc_old["title"] ), _tokenizer_cleaner( doc_old["text"] )
 
 def _BM25(bm25, d_keys: List[str], q :List[Tuple[str, List[str]]], start:int, stop:int, skip:int) -> Dict[str, Dict[str, float]]:
@@ -102,7 +100,7 @@ def _BM25(bm25, d_keys: List[str], q :List[Tuple[str, List[str]]], start:int, st
         
     return results
     
-def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]) -> Dict[str, Dict[str, float]]:
+def sparse_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]) -> Dict[str, Dict[str, float]]:
     """
     BM25 scores calculation.
 
@@ -116,25 +114,21 @@ def BM25_retrieval(documents: Dict[str, Dict[str, str]], queries: Dict[str, str]
     
     #document & query cleaning and tokenization
     
-    #disable warning for the nlp
-    with warnings.catch_warnings():
-            
-        warnings.simplefilter("ignore")
-        
-        #parallel document cleaning and tokenization
-        with Pool() as p:
-            tokenized_docs=list(tqdm( p.imap(_clean_document, documents.items()), 
-                                                total=len(documents),
-                                                desc="documents cleaning and tokenization"))
-        d={}
-        for id, text, title in tokenized_docs:
-            d[id]=title+text
-        
-        #query cleaning
-        q={}
-        for id,text in tqdm( queries.items(), desc="queries cleaning and tokenization" ):
-            q[id]=_tokenizer_cleaner( text )
+    #parallel document cleaning and tokenization
+    with Pool() as p:
+        tokenized_docs=list(tqdm( p.imap(_clean_document, documents.items()), 
+                                            total=len(documents),
+                                            desc="documents cleaning and tokenization"))
+    d={}
+    for id, text, title in tokenized_docs:
+        d[id]=title+text
     
+    #query cleaning
+    q={}
+    for id,text in tqdm( queries.items(), desc="queries cleaning and tokenization" ):
+        q[id]=_tokenizer_cleaner( text )
+    
+
     #BM25
     
     results={}
