@@ -211,10 +211,10 @@ def ground_truth(results_sparse: Dict[str, Dict[str, float]], results_dense: Dic
                                 for doc_id in set(relevant_sparse) | set(relevant_dense) }
         
         #top k relevant document ids
-        k_keys_sorted_by_values = heapq.nlargest(k, documents_per_query, key=documents_per_query.get)
+        top_k_documents = heapq.nlargest(k, documents_per_query, key=documents_per_query.get)
         
         #the score for each relevant document is set to 1
-        real_result[quey_id]={ key:1 for key in k_keys_sorted_by_values }
+        real_result[quey_id]={ key:1 for key in top_k_documents }
     
     return real_result
 
