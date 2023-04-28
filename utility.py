@@ -280,13 +280,13 @@ def metrics_calculation(dataset:str,results_sparse: Dict[str, Dict[str, float]],
     for k in tqdm(ks, desc="k values:"):
         metrics_per_k_prime = {}
 
-        gt_k = ground_truth(results_sparse, results_dense, k)
+        ground_truth_k = ground_truth(results_sparse, results_dense, k)
         
         for k_prime in tqdm( k_primes, desc="k' values:"):
 
             results = merging(results_sparse, results_dense, k_prime, k)
             
-            ndcg, _, recall, precision = EvaluateRetrieval.evaluate(gt_k,
+            ndcg, _, recall, precision = EvaluateRetrieval.evaluate(ground_truth_k,
                                                                     results, [k])
 
             metrics = {"ndcg": list(ndcg.values())[0], "recall": list(recall.values())[0], "precision": list(precision.values())[0]}
@@ -308,11 +308,11 @@ def load_metrics(dataset:str):
     return metrics_per_k
 
 def plot_top_k_metrics_vs_k_prime(metrics_per_k: Dict[int, Dict[int, Dict[str, float]]]):
-    
-    fig, axs = plt.subplots(1, 3, figsize=(14*3, 10))
 
-    for ax, metric_name in zip(axs,["ndcg", "recall", "precision"]):
+    for metric_name in ["ndcg", "recall", "precision"]:
 
+        fig, ax = plt.subplots(figsize=(15,15))
+        
         ax.set_xlabel("k'",fontsize=15)
         ax.set_ylabel(metric_name,fontsize=15)
         
@@ -331,4 +331,4 @@ def plot_top_k_metrics_vs_k_prime(metrics_per_k: Dict[int, Dict[int, Dict[str, f
         ax.xaxis.set_ticks(np.arange(15, 175, 5.0))
         ax.yaxis.set_ticks(np.arange(0, 1.05, 0.05))
     
-    fig.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.93, 0.93))
+        fig.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.93, 0.93))
