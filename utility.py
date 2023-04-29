@@ -277,18 +277,24 @@ def metrics_calculation(dataset:str,results_sparse: Dict[str, Dict[str, float]],
 
     metrics_per_k={}
     
+    #for each fixed value of k:
     for k in tqdm(ks, desc="k values:"):
         metrics_per_k_prime = {}
 
+        #fixed k ground truth calculation
         ground_truth_k = ground_truth(results_sparse, results_dense, k)
         
+        #for each value of k':
         for k_prime in tqdm( k_primes, desc="k' values:"):
-
+            
+            #merging with the given k'
             results = merging(results_sparse, results_dense, k_prime, k)
             
+            #metric calculation with given k ground truth and k' merging
             ndcg, _, recall, precision = EvaluateRetrieval.evaluate(ground_truth_k,
                                                                     results, [k])
 
+            #better formatting for the plot function
             metrics = {"ndcg": list(ndcg.values())[0], "recall": list(recall.values())[0], "precision": list(precision.values())[0]}
 
             metrics_per_k_prime[k_prime] = metrics
@@ -300,14 +306,30 @@ def metrics_calculation(dataset:str,results_sparse: Dict[str, Dict[str, float]],
         
     return metrics_per_k
 
-def load_metrics(dataset:str):
+def load_metrics(dataset:str) -> Dict[int, Dict[int, Dict[str, float]]] :
+    """
+    Load the metrics for the given dataset.
+
+    Args:
+        dataset (str): file name to load.
+
+    Returns:
+        Dict[int, Dict[int, Dict[str, float]]]: metrics.
+    """
     
     with open(dataset+"_metrics.pkl", 'rb') as inp:
         metrics_per_k = pickle.load(inp)
     
     return metrics_per_k
 
-def plot_top_k_metrics_vs_k_prime(metrics_per_k: Dict[int, Dict[int, Dict[str, float]]]):
+def plot_top_k_metrics_vs_k_prime(dataset_name:str, metrics_per_k: Dict[int, Dict[int, Dict[str, float]]]):
+    """
+    Results plot function.
+
+    Args:
+        dataset_name (str): dataset name for plot title.
+        metrics_per_k (Dict[int, Dict[int, Dict[str, float]]]): metrics to plot.
+    """
 
     for metric_name in ["ndcg", "recall", "precision"]:
 
@@ -316,7 +338,7 @@ def plot_top_k_metrics_vs_k_prime(metrics_per_k: Dict[int, Dict[int, Dict[str, f
         ax.set_xlabel("k'",fontsize=15)
         ax.set_ylabel(metric_name,fontsize=15)
         
-        ax.set_title(metric_name+" vs k'",fontsize=20)
+        ax.set_title(dataset_name+": "+metric_name+" vs k'",fontsize=20)
 
         for k, metrics_per_k_prime in metrics_per_k.items():
             
@@ -324,11 +346,11 @@ def plot_top_k_metrics_vs_k_prime(metrics_per_k: Dict[int, Dict[int, Dict[str, f
                             for key, metrics in metrics_per_k_prime.items()]).T
 
             ax.plot(x, y, '-x', label="k = "+str(k))
-            
-            ax.grid()
-            
-        handles, labels = ax.get_legend_handles_labels()
+        
         ax.xaxis.set_ticks(np.arange(15, 175, 5.0))
         ax.yaxis.set_ticks(np.arange(0, 1.05, 0.05))
-    
+        
+        ax.grid()
+        
+        handles, labels = ax.get_legend_handles_labels()
         fig.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.93, 0.93))
