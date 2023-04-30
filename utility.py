@@ -201,13 +201,15 @@ def ground_truth(results_sparse: Dict[str, Dict[str, float]], results_dense: Dic
     real_result={}
 
     #for each query iterate over sparse and dense documents
-    for ( quey_id, relevant_sparse ), relevant_dense in zip( results_sparse.items(), results_dense.values() ):
+    for quey_id, relevant_sparse in results_sparse.items():
+        
+        relevant_dense=results_dense[quey_id]
         
         #union of sparse documents and dense documents by summing up the scores
         #if id not present the corresponding score is assumed:
         # -to be 0 for the sparse representation.
-        # -to be -inf for the dense representation.
-        documents_per_query={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, float("-inf"))  
+        # -to be 0 for the dense representation.
+        documents_per_query={ doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, 0)  
                                 for doc_id in set(relevant_sparse) | set(relevant_dense) }
         
         #top k relevant document ids
@@ -237,7 +239,9 @@ def merging(results_sparse: Dict[str, Dict[str, float]],
     result={}
     
     #for each query iterate over sparse and dense documents
-    for ( quey_id, relevant_sparse ), relevant_dense in zip( results_sparse.items(), results_dense.values() ):
+    for quey_id, relevant_sparse in results_sparse.items():
+        
+        relevant_dense=results_dense[quey_id]
         
         #top k prime sparse document ids
         top_k_prime_documents_sparse = heapq.nlargest(k_prime, relevant_sparse, key=relevant_sparse.get)
@@ -248,8 +252,8 @@ def merging(results_sparse: Dict[str, Dict[str, float]],
         #union of top k prime sparse documents and top k prime dense documents by summing up their scores
         #if id not present the corresponding score is assumed:
         # -to be 0 for the sparse representation.
-        # -to be -inf for the dense representation.
-        merged = { doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, float("-inf"))
+        # -to be 0 for the dense representation.
+        merged = { doc_id: relevant_sparse.get(doc_id, 0) + relevant_dense.get(doc_id, 0)
                             for doc_id in set(top_k_prime_documents_sparse) | set(top_k_prime_documents_dense) }
         
         #retrieve the top-k documents from the merged set
@@ -301,7 +305,7 @@ def metrics_calculation(dataset:str,results_sparse: Dict[str, Dict[str, float]],
         
         metrics_per_k[k]=metrics_per_k_prime
         
-    with open(dataset+"_metrics.pkl", 'wb') as outp:
+    with open("metrics/"+dataset+"_metrics.pkl", 'wb') as outp:
         pickle.dump(metrics_per_k, outp, pickle.HIGHEST_PROTOCOL)
         
     return metrics_per_k
@@ -333,7 +337,7 @@ def plot_top_k_metrics_vs_k_prime(dataset_name:str, metrics_per_k: Dict[int, Dic
 
     for metric_name in ["ndcg", "recall", "precision"]:
 
-        fig, ax = plt.subplots(figsize=(15,15))
+        fig, ax = plt.subplots(figsize=(15,10))
         
         ax.set_xlabel("k'",fontsize=15)
         ax.set_ylabel(metric_name,fontsize=15)
